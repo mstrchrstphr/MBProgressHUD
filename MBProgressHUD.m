@@ -38,17 +38,16 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 - (void)registerForNotifications;
 - (void)unregisterFromNotifications;
 - (void)updateUIForKeypath:(NSString *)keyPath;
-- (void)hideUsingAnimation:(BOOL)animated;
-- (void)showUsingAnimation:(BOOL)animated;
-- (void)done;
+- (void)hideUsingAnimation:(BOOL)animated withCompletionBlock:(void (^)())completionBlock;
+- (void)showUsingAnimation:(BOOL)animated withCompletionBlock:(void (^)())completionBlock;
+- (void)animationsFinishedWithCompletionBlock:(void (^)())completionBlock;
 - (void)updateIndicators;
-- (void)handleGraceTimer:(NSTimer *)theTimer;
-- (void)handleMinShowTimer:(NSTimer *)theTimer;
+- (void)handleGraceTimerWithCompletionBlock:(void (^)())completionBlock;
+- (void)handleMinShowTimerWithCompletionBlock:(void (^)())completionBlock;
 - (void)setTransformForCurrentOrientation:(BOOL)animated;
 - (void)cleanUp;
 - (void)launchExecution;
 - (void)deviceOrientationDidChange:(NSNotification *)notification;
-- (void)hideDelayed:(NSNumber *)animated;
 
 @property (atomic, MB_STRONG) UIView *indicator;
 @property (atomic, MB_STRONG) NSTimer *graceTimer;
@@ -98,9 +97,6 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 @synthesize detailsLabelText;
 @synthesize progress;
 @synthesize size;
-#if NS_BLOCKS_AVAILABLE
-@synthesize completionBlock;
-#endif
 
 #pragma mark - Class methods
 
@@ -217,9 +213,7 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 	[minShowTimer release];
 	[showStarted release];
 	[customView release];
-#if NS_BLOCKS_AVAILABLE
-	[completionBlock release];
-#endif
+
 	[super dealloc];
 #endif
 }
@@ -227,55 +221,77 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 #pragma mark - Show & hide
 
 - (void)show:(BOOL)animated {
-	useAnimation = animated;
+	[self show:animated withCompletionBlock:nil];
+}
+
+- (void)show:(BOOL)animated withCompletionBlock:(void (^)())completionBlock
+{
+    useAnimation = animated;
 	// If the grace time is set postpone the HUD display
 	if (self.graceTime > 0.0) {
-		self.graceTimer = [NSTimer scheduledTimerWithTimeInterval:self.graceTime target:self 
-						   selector:@selector(handleGraceTimer:) userInfo:nil repeats:NO];
-	} 
-	// ... otherwise show the HUD imediately 
+        double delayInSeconds = self.graceTime;
+        dispatch_time_t popTime = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayInSeconds * NSEC_PER_SEC));
+        dispatch_after(popTime, dispatch_get_main_queue(), ^(void){
+            [self handleGraceTimerWithCompletionBlock:completionBlock];
+        });
+	}
+	// ... otherwise show the HUD imediately
 	else {
 		[self setNeedsDisplay];
-		[self showUsingAnimation:useAnimation];
+		[self showUsingAnimation:useAnimation withCompletionBlock:completionBlock];
 	}
 }
 
 - (void)hide:(BOOL)animated {
-	useAnimation = animated;
+	[self hide:animated withCompletionBlock:nil];
+}
+
+- (void)hide:(BOOL)animated withCompletionBlock:(void (^)())completionBlock
+{
+    useAnimation = animated;
 	// If the minShow time is set, calculate how long the hud was shown,
 	// and pospone the hiding operation if necessary
 	if (self.minShowTime > 0.0 && showStarted) {
 		NSTimeInterval interv = [[NSDate date] timeIntervalSinceDate:showStarted];
 		if (interv < self.minShowTime) {
-			self.minShowTimer = [NSTimer scheduledTimerWithTimeInterval:(self.minShowTime - interv) target:self 
-								selector:@selector(handleMinShowTimer:) userInfo:nil repeats:NO];
-			return;
-		} 
+            double delayInSeconds = (self.minShowTime - interv);
+            dispatch_time_t popTime = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayInSeconds * NSEC_PER_SEC));
+            dispatch_after(popTime, dispatch_get_main_queue(), ^(void){
+                [self handleMinShowTimerWithCompletionBlock:completionBlock];
+            });
+		}
 	}
 	// ... otherwise hide the HUD immediately
-	[self hideUsingAnimation:useAnimation];
+    else {
+        [self hideUsingAnimation:useAnimation withCompletionBlock:completionBlock];
+    }
 }
 
 - (void)hide:(BOOL)animated afterDelay:(NSTimeInterval)delay {
-	[self performSelector:@selector(hideDelayed:) withObject:[NSNumber numberWithBool:animated] afterDelay:delay];
+	[self hide:animated afterDelay:delay withCompletionBlock:nil];
 }
 
-- (void)hideDelayed:(NSNumber *)animated {
-	[self hide:[animated boolValue]];
+- (void)hide:(BOOL)animated afterDelay:(NSTimeInterval)delay withCompletionBlock:(void (^)())completionBlock
+{    
+    double delayInSeconds = delay;
+    dispatch_time_t popTime = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayInSeconds * NSEC_PER_SEC));
+    dispatch_after(popTime, dispatch_get_main_queue(), ^(void){
+        [self hide:animated withCompletionBlock:completionBlock];
+    });
 }
 
 #pragma mark - Timer callbacks
 
-- (void)handleGraceTimer:(NSTimer *)theTimer {
+- (void)handleGraceTimerWithCompletionBlock:(void (^)())completionBlock {
 	// Show the HUD only if the task is still running
 	if (taskInProgress) {
 		[self setNeedsDisplay];
-		[self showUsingAnimation:useAnimation];
+		[self showUsingAnimation:useAnimation withCompletionBlock:completionBlock];
 	}
 }
 
-- (void)handleMinShowTimer:(NSTimer *)theTimer {
-	[self hideUsingAnimation:useAnimation];
+- (void)handleMinShowTimerWithCompletionBlock:(void (^)())completionBlock {
+	[self hideUsingAnimation:useAnimation withCompletionBlock:completionBlock];
 }
 
 #pragma mark - View Hierrarchy
@@ -289,7 +305,7 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 
 #pragma mark - Internal show & hide operations
 
-- (void)showUsingAnimation:(BOOL)animated {
+- (void)showUsingAnimation:(BOOL)animated withCompletionBlock:(void (^)())completionBlock {
 	if (animated && animationType == MBProgressHUDAnimationZoomIn) {
 		self.transform = CGAffineTransformConcat(rotationTransform, CGAffineTransformMakeScale(0.5f, 0.5f));
 	} else if (animated && animationType == MBProgressHUDAnimationZoomOut) {
@@ -311,46 +327,49 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 	}
 }
 
-- (void)hideUsingAnimation:(BOOL)animated {
+- (void)hideUsingAnimation:(BOOL)animated withCompletionBlock:(void (^)())completionBlock {
 	// Fade out
 	if (animated && showStarted) {
-		[UIView beginAnimations:nil context:NULL];
-		[UIView setAnimationDuration:0.30];
-		[UIView setAnimationDelegate:self];
-		[UIView setAnimationDidStopSelector:@selector(animationFinished:finished:context:)];
-		// 0.02 prevents the hud from passing through touches during the animation the hud will get completely hidden
-		// in the done method
-		if (animationType == MBProgressHUDAnimationZoomIn) {
-			self.transform = CGAffineTransformConcat(rotationTransform, CGAffineTransformMakeScale(1.5f, 1.5f));
-		} else if (animationType == MBProgressHUDAnimationZoomOut) {
-			self.transform = CGAffineTransformConcat(rotationTransform, CGAffineTransformMakeScale(0.5f, 0.5f));
-		}
-
-		self.alpha = 0.02f;
-		[UIView commitAnimations];
+        
+        [UIView animateWithDuration:0.30
+                              delay:0.0
+                            options:0
+                         animations:^{
+                             // 0.02 prevents the hud from passing through touches during the animation the hud will get completely hidden
+                             // in the done method
+                             if (animationType == MBProgressHUDAnimationZoomIn) {
+                                 self.transform = CGAffineTransformConcat(rotationTransform, CGAffineTransformMakeScale(1.5f, 1.5f));
+                             } else if (animationType == MBProgressHUDAnimationZoomOut) {
+                                 self.transform = CGAffineTransformConcat(rotationTransform, CGAffineTransformMakeScale(0.5f, 0.5f));
+                             }
+                             
+                             self.alpha = 0.02f;
+                         } completion:^(BOOL finished) {
+                             [self animationsFinishedWithCompletionBlock:completionBlock];
+                         }];
 	}
 	else {
 		self.alpha = 0.0f;
-		[self done];
+		[self animationsFinishedWithCompletionBlock:completionBlock];
 	}
 	self.showStarted = nil;
 }
 
 - (void)animationFinished:(NSString *)animationID finished:(BOOL)finished context:(void*)context {
-	[self done];
+	[self animationsFinishedWithCompletionBlock:nil];
 }
 
-- (void)done {
+- (void)animationsFinishedWithCompletionBlock:(void (^)())completionBlock {
 	isFinished = YES;
 	self.alpha = 0.0f;
 	if ([delegate respondsToSelector:@selector(hudWasHidden:)]) {
 		[delegate performSelector:@selector(hudWasHidden:) withObject:self];
 	}
 #if NS_BLOCKS_AVAILABLE
-	if (self.completionBlock) {
-		self.completionBlock();
-		self.completionBlock = NULL;
-	}
+    // Completion block that was passed into the show/hide methods
+    if (completionBlock) {
+        completionBlock();
+    }
 #endif
 	if (removeFromSuperViewOnHide) {
 		[self removeFromSuperview];
@@ -389,14 +408,13 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 - (void)showAnimated:(BOOL)animated whileExecutingBlock:(dispatch_block_t)block onQueue:(dispatch_queue_t)queue
 	 completionBlock:(MBProgressHUDCompletionBlock)completion {
 	self.taskInProgress = YES;
-	self.completionBlock = completion;
 	dispatch_async(queue, ^(void) {
         block();
         dispatch_async(dispatch_get_main_queue(), ^(void) {
             [self cleanUp];
         });
     });
-  [self show:animated];
+  [self show:animated withCompletionBlock:completion];
 }
 
 #endif

@@ -56,7 +56,7 @@
 	[self.navigationController.view addSubview:HUD];
 	
 	HUD.delegate = self;
-	HUD.labelText = @"Loading";
+	HUD.labelText = @"Native Twitter signin failed. Please verify your account in Settings.";
 	
 	[HUD showWhileExecuting:@selector(myTask) onTarget:self withObject:nil animated:YES];
 }
@@ -67,8 +67,9 @@
 	[self.navigationController.view addSubview:HUD];
 	
 	HUD.delegate = self;
-	HUD.labelText = @"Loading";
-	HUD.detailsLabelText = @"updating data";
+	HUD.labelText = nil;
+	HUD.mode = MBProgressHUDModeText;
+	HUD.detailsLabelText = @"Native Twitter signin failed. Please verify your account in Settings.";
 	HUD.square = YES;
 	
 	[HUD showWhileExecuting:@selector(myTask) onTarget:self withObject:nil animated:YES];
@@ -193,7 +194,7 @@
 	
 	// Configure for text only and offset down
 	hud.mode = MBProgressHUDModeText;
-	hud.labelText = @"Some message...";
+	hud.labelText = @"Native Twitter signin failed. Please verify your account in Settings.";
 	hud.margin = 10.f;
 	hud.yOffset = 150.f;
 	hud.removeFromSuperViewOnHide = YES;
