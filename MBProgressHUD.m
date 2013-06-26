@@ -317,13 +317,17 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 	self.showStarted = [NSDate date];
 	// Fade in
 	if (animated) {
-		[UIView beginAnimations:nil context:NULL];
-		[UIView setAnimationDuration:0.30];
-		self.alpha = 1.0f;
-		if (animationType == MBProgressHUDAnimationZoomIn || animationType == MBProgressHUDAnimationZoomOut) {
-			self.transform = rotationTransform;
-		}
-		[UIView commitAnimations];
+		[UIView animateWithDuration:0.3
+                         animations:^{
+                             self.alpha = 1.0f;
+                             if (animationType == MBProgressHUDAnimationZoomIn || animationType == MBProgressHUDAnimationZoomOut) {
+                                 self.transform = rotationTransform;
+                             }
+                         } completion:^(BOOL finished) {
+                             if (completionBlock) {
+                                 completionBlock();
+                             }
+                         }];
 	}
 	else {
 		self.alpha = 1.0f;
